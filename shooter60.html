@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shooter Game</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; text-align: center; font-family: Arial, sans-serif; }
+        canvas { background: #111; display: none; }
+
+        #menu, #shop, #locker, #leaderboard, #login {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: black;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        h1, h2 { font-size: 50px; margin-bottom: 20px; }
+        input, button { padding: 10px; font-size: 18px; margin-bottom: 20px; text-align: center; }
+        .menu-button, .skin-button, .shop-button {
+            background: #333;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 20px;
+            cursor: pointer;
+            margin: 10px;
+            width: 200px;
+        }
+        .menu-button:hover, .skin-button:hover, .shop-button:hover { background: #555; }
+        #restartButton { display: none; position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); font-size: 50px; color: red; }
+        #gameOverImage { display: none; }
+        #shop { display: none; }
+        .preview { width: 100px; height: 100px; margin: 20px auto; background-color: white; border-radius: 10px; }
+        #hud { font-size: 20px; color: white; position: absolute; top: 10px; left: 10px; display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="login">
+        <h1>Login</h1>
+        <input type="text" id="username" placeholder="Username" maxlength="15">
+        <input type="password" id="password" placeholder="Password" maxlength="15">
+        <button class="menu-button" id="loginButton">Login</button>
+        <button class="menu-button" id="registerButton">Register</button>
+    </div>
+
+    <div id="menu" style="display:none;">
+        <h1>Shooter Game</h1>
+        <input type="text" id="playerName" placeholder="Enter your name" maxlength="15">
+        <button class="menu-button" id="startGame">Start Game</button>
+        <button class="menu-button" id="lockerButton">Locker</button>
+        <button class="menu-button" id="showLeaderboard">Leaderboard</button>
+        <button class="menu-button" id="shopButton">Shop</button>
+    </div>
+
+    <div id="shop" style="display:none;">
+        <h1>Shop</h1>
+        <p>Coins: <span id="coinCount">0</span></p>
+        <div id="skinButtons"></div>
+        <button class="shop-button" id="closeShop">Close Shop</button>
+    </div>
+
+    <div id="locker" style="display:none;">
+        <h2>Select Skin</h2>
+        <div id="preview" class="preview"></div>
+        <div id="skinButtonsLocker"></div>
+        <button class="skin-button" id="closeLocker">Close Locker</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <button id="restartButton">Restart</button>
+    <div id="gameOverImage">GAME OVER</div>
+
+    <div id="leaderboard" style="display:none;">
+        <h2>Leaderboard - Top 50</h2>
+        <ul id="leaderboardList"></ul>
+        <button onclick="closeLeaderboard()">Close</button>
+    </div>
+
+    <div id="hud"></div>
+
+    <script>
+        const menu = document.getElementById('menu');
+        const startGameButton = document.getElementById('startGame');
+        const showLeaderboardButton = document.getElementById('showLeaderboard');
+        const shopButton = document.getElementById('shopButton');
+        const restartButton = document.getElementById('restartButton');
+        const playerNameInput = document.getElementById('playerName');
+        const leaderboardDiv = document.getElementById('leaderboard');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverImage = document.getElementById('gameOverImage');
+        const lockerDiv = document.getElementById('locker');
+        const lockerButton = document.getElementById('lockerButton');
+        const previewDiv = document.getElementById('preview');
+        const shopDiv = document.getElementById('shop');
+        const coinCountDisplay = document.getElementById('coinCount');
+        const loginDiv = document.getElementById('login');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let gameOver = false;
+        let playerName = "";
+        let score = 0;
+        let lives = 3;
+        let coins = JSON.parse(localStorage.getItem('coins')) || 0;
+        let enemies = [];
+        let bullets = [];
+        let keys = {};
+        let playerSkin = 'orange'; // Default skin
+        let unlockedSkins = { 'orange': true, 'purple': false, 'pink': false, 'lightblue': false, 'cyan': false, 'gold': false };
+
+        const player = { x: canvas.width / 2, y: canvas.height - 50, width: 50, height: 50, speed: 5, color: playerSkin };
+
+        window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+        function saveLeaderboard() {
+            let leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            leaderboard.push({ name: playerName, score: score });
+            leaderboard.sort((a, b) => b.score - a.score);
+            leaderboard = leaderboard.slice(0, 50); // Top 50
+            localStorage.setItem('leaderboard', JSON.stringify(leaderboard));
+        }
+
+        function loadLeaderboard() {
+            let leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+            leaderboardList.innerHTML = '';
+            leaderboard.forEach(entry => {
+                const li = document.createElement('li');
+                li.textContent = `${entry.name}: ${entry.score}`;
+                leaderboardList.appendChild(li);
+            });
+        }
+
+        function createBullet() {
+            bullets.push({ x: player.x + player.width / 2, y: player.y, width: 5, height: 10, speed: 10, color: 'red' });
+        }
+
+        function createEnemy() {
+            if (enemies.length < 5) {
+                const enemySize = 50;
+                enemies.push({
+                    x: Math.random() * (canvas.width - enemySize),
+                    y: -enemySize,
+                    width: enemySize,
+                    height: enemySize,
+                    speed: 1.5 + Math.random() * 1.5,
+                    color: 'green'
+                });
+            }
+        }
+
+        function movePlayer() {
+            if (keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+            if (keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += player.speed;
+            if (keys['ArrowUp'] && player.y > 0) player.y -= player.speed;
+            if (keys['ArrowDown'] && player.y < canvas.height - player.height) player.y += player.speed;
+        }
+
+        function moveBullets() {
+            bullets = bullets.filter(bullet => {
+                bullet.y -= bullet.speed;
+                return bullet.y >= 0;
+            });
+        }
+
+        function moveEnemies() {
+            enemies = enemies.filter(enemy => {
+                enemy.y += enemy.speed;
+                if (enemy.y > canvas.height) {
+                    lives--;
+                    if (lives <= 0) endGame();
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        function checkCollisions() {
+            bullets.forEach((bullet, i) => {
+                enemies.forEach((enemy, j) => {
+                    if (bullet.x < enemy.x + enemy.width && bullet.x + bullet.width > enemy.x &&
+                        bullet.y < enemy.y + enemy.height && bullet.y + bullet.height > enemy.y) {
+                        bullets.splice(i, 1);
+                        enemies.splice(j, 1);
+                        score += 10;
+                        coins += 5; // Gain coins for each enemy hit
+                        localStorage.setItem('coins', coins);
+                        coinCountDisplay.textContent = Math.min(coins, 50000);
+                        return;
+                    }
+                });
+            });
+        }
+
+        function drawGalaxy() {
+            const numStars = 200;
+            ctx.fillStyle = 'white';
+            for (let i = 0; i < numStars; i++) {
+                let x = Math.random() * canvas.width;
+                let y = Math.random() * canvas.height;
+                let size = Math.random() * 2;
+                ctx.fillRect(x, y, size, size);
+            }
+        }
+
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGalaxy();
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            ctx.fillStyle = 'red';
+            bullets.forEach(bullet => ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height));
+            ctx.fillStyle = 'green';
+            enemies.forEach(enemy => ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height));
+            document.getElementById('hud').textContent = `Player: ${playerName}  Score: ${score}  Lives: ${lives}  Coins: ${coins}`;
+        }
+
+        function endGame() {
+            gameOver = true;
+            gameOverImage.style.display = 'block';
+            saveLeaderboard();
+            restartButton.style.display = 'inline-block';
+        }
+
+        function updateGame() {
+            if (gameOver) return;
+            movePlayer();
+            moveBullets();
+            moveEnemies();
+            checkCollisions();
+            drawGame();
+            requestAnimationFrame(updateGame);
+        }
+
+        function startGame() {
+            playerName = playerNameInput.value.trim();
+            if (playerName === "") return alert("Enter your name to start!");
+
+            menu.style.display = "none";
+            canvas.style.display = "block";
+            gameOver = false;
+            score = 0;
+            lives = 3;
+            enemies = [];
+            bullets = [];
+            gameOverImage.style.display = 'none';
+            restartButton.style.display = 'none';
+            coinCountDisplay.textContent = coins;
+            updateGame();
+            setInterval(createEnemy, 2000);
+        }
+
+        function updatePreview(color) {
+            previewDiv.style.backgroundColor = color;
+        }
+
+        function unlockSkin(color) {
+            unlockedSkins[color] = true;
+            playerSkin = color;
+            player.color = playerSkin;
+            updatePreview(playerSkin);
+            alert(color.charAt(0).toUpperCase() + color.slice(1) + ' skin unlocked!'); // Notify skin unlocked
+        }
+
+        const skinColors = ['orange', 'purple', 'pink', 'lightblue', 'cyan', 'gold'];
+        const skinButtonsLocker = document.getElementById('skinButtonsLocker');
+        skinColors.forEach((color, index) => {
+            const button = document.createElement('button');
+            button.className = 'skin-button';
+            button.id = `skin${index + 1}`;
+            button.textContent = `${color.charAt(0).toUpperCase() + color.slice(1)}`;
+            button.addEventListener('click', () => {
+                if (unlockedSkins[color]) unlockSkin(color);
+            });
+            skinButtonsLocker.appendChild(button);
+        });
+
+        lockerButton.addEventListener('click', () => {
+            lockerDiv.style.display = 'block';
+            menu.style.display = 'none';
+        });
+
+        document.getElementById('closeLocker').addEventListener('click', () => {
+            lockerDiv.style.display = 'none';
+            menu.style.display = 'flex';
+        });
+
+        showLeaderboardButton.addEventListener('click', () => {
+            leaderboardDiv.style.display = 'block';
+            loadLeaderboard();
+        });
+
+        function closeLeaderboard() {
+            leaderboardDiv.style.display = 'none';
+        }
+
+        restartButton.addEventListener('click', () => {
+            lockerDiv.style.display = 'none';
+            menu.style.display = 'flex';
+            canvas.style.display = 'none';
+            restartButton.style.display = 'none';
+            gameOverImage.style.display = 'none';
+        });
+
+        startGameButton.addEventListener('click', startGame);
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === ' ' && !gameOver) {
+                createBullet();
+            }
+        });
+
+        // Shop functionality
+        const skinPrices = { 'orange': 100, 'purple': 200, 'pink': 300, 'lightblue': 400, 'cyan': 500, 'gold': 600 };
+        shopButton.addEventListener('click', () => {
+            shopDiv.style.display = 'flex';
+            menu.style.display = 'none';
+            const skinButtons = document.getElementById('skinButtons');
+            skinButtons.innerHTML = '';
+            Object.keys(skinPrices).forEach((skin, index) => {
+                const button = document.createElement('button');
+                button.className = 'shop-button';
+                button.id = `buySkin${index + 1}`;
+                button.textContent = `Buy ${skin.charAt(0).toUpperCase() + skin.slice(1)} (${skinPrices[skin]} coins)`;
+                button.addEventListener('click', () => {
+                    if (coins >= skinPrices[skin] && !unlockedSkins[skin]) {
+                        coins -= skinPrices[skin];
+                        unlockedSkins[skin] = true;
+                        localStorage.setItem('coins', coins);
+                        coinCountDisplay.textContent = Math.min(coins, 50000);
+                        alert(skin.charAt(0).toUpperCase() + skin.slice(1) + ' skin unlocked!'); // Notify skin unlocked
+                    } else alert('Not enough coins or already unlocked!');
+                });
+                skinButtons.appendChild(button);
+            });
+        });
+
+        document.getElementById('closeShop').addEventListener('click', () => {
+            shopDiv.style.display = 'none';
+            menu.style.display = 'flex';
+        });
+
+        // Login and Registration functionality
+        const users = JSON.parse(localStorage.getItem('users')) || {};
+
+        loginButton.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (users[username] && users[username] === password) {
+                playerName = username;
+                loginDiv.style.display = 'none';
+                menu.style.display = 'flex';
+                coinCountDisplay.textContent = coins;
+                loadLeaderboard();
+            } else {
+                alert('Invalid username or password!');
+            }
+        });
+
+        registerButton.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (!users[username]) {
+                users[username] = password;
+                localStorage.setItem('users', JSON.stringify(users));
+                alert('Registration successful! You can now log in.');
+            } else {
+                alert('Username already exists!');
+            }
+        });
+    </script>
+</body>
+</html>
